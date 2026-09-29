@@ -5,6 +5,7 @@
  */
 
 import { GovernmentPolicy, PolicyCitizenImpact } from '../types/index';
+import { speechSynthesisManager, stopSingleVoice } from './speechSynthesisSingleton';
 
 export interface PolicySpeechOptions {
   policy: GovernmentPolicy;
@@ -414,6 +415,7 @@ function splitIntoSentenceChunks(text: string): string[] {
  * Play Policy Speech using SpeechSynthesis API (with high-fidelity Tamil tuning)
  */
 export async function playPolicySpeech(options: PolicySpeechOptions): Promise<void> {
+  speechSynthesisManager.stopAll();
   stopPolicySpeech();
 
   const langCode = options.langCode || 'en';

@@ -1,4 +1,9 @@
 // Universal Multilingual Translation and Native Speech Synthesis Service
+import {
+  speakSingleVoice,
+  stopSingleVoice,
+  isSingleVoiceSpeaking,
+} from './speechSynthesisSingleton';
 
 export interface TranslatedCivicReport {
   targetLanguageCode: string;
@@ -314,24 +319,9 @@ export function translateReport(
   };
 }
 
-// Native Speech Synthesis playback with precise locale voice selection and Gemini TTS fallback
-let activeUtterance: SpeechSynthesisUtterance | null = null;
-let activeMultilingualAudio: HTMLAudioElement | null = null;
-
+// Native Speech Synthesis playback delegated to SpeechSynthesisSingleton
 export function stopSpeaking(): void {
-  if (activeMultilingualAudio) {
-    try {
-      activeMultilingualAudio.pause();
-      activeMultilingualAudio.currentTime = 0;
-    } catch {
-      // ignore
-    }
-    activeMultilingualAudio = null;
-  }
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    activeUtterance = null;
-  }
+  stopSingleVoice();
 }
 
 export async function speakCivicText(params: {
@@ -341,118 +331,15 @@ export async function speakCivicText(params: {
   onEnd?: () => void;
   onError?: (err: any) => void;
 }): Promise<void> {
-  stopSpeaking();
-
-  if (typeof window === 'undefined') {
-    params.onEnd?.();
-    return;
-  }
-
-  const clean = params.text.trim();
-  if (!clean) {
-    params.onEnd?.();
-    return;
-  }
-
-  // 1. For Tamil and Indian regional languages, prefer Gemini TTS & Server Stream for 100% fluent pronunciation
-  if (['ta', 'ml', 'te', 'kn', 'hi'].includes(params.langCode)) {
-    try {
-      const res = await fetch('/api/voice/gemini-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: clean,
-          lang: params.langCode,
-          voice: 'Kore',
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.audioUrl) {
-          const audio = new Audio(data.audioUrl);
-          activeMultilingualAudio = audio;
-          audio.onplay = () => params.onStart?.();
-          audio.onended = () => {
-            activeMultilingualAudio = null;
-            params.onEnd?.();
-          };
-          audio.onerror = () => {
-            activeMultilingualAudio = null;
-            params.onEnd?.();
-          };
-          audio.play().catch(() => params.onEnd?.());
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('Multilingual TTS fetch fallback:', err);
-    }
-  }
-
-  // 2. Browser SpeechSynthesis: ONLY IF verified native voice is installed
-  if ('speechSynthesis' in window) {
-    const langConfig = SPEECH_LOCALES[params.langCode] || SPEECH_LOCALES.en;
-    const targetLocale = langConfig.locale;
-    const voices = window.speechSynthesis.getVoices();
-
-    const matchedVoice = voices.find((v) => {
-      const langLower = v.lang.toLowerCase();
-      if (params.langCode === 'ta') {
-        return (
-          (langLower.startsWith('ta') ||
-            v.name.toLowerCase().includes('tamil') ||
-            v.name.includes('தமிழ்')) &&
-          !v.name.toLowerCase().includes('english')
-        );
-      }
-      return langLower === targetLocale.toLowerCase() || langLower.startsWith(params.langCode.toLowerCase());
-    });
-
-    if (matchedVoice) {
-      const utterance = new SpeechSynthesisUtterance(clean);
-      utterance.lang = matchedVoice.lang || targetLocale;
-      utterance.voice = matchedVoice;
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-
-      utterance.onstart = () => params.onStart?.();
-      utterance.onend = () => {
-        activeUtterance = null;
-        params.onEnd?.();
-      };
-      utterance.onerror = (e) => {
-        activeUtterance = null;
-        params.onError?.(e);
-      };
-
-      activeUtterance = utterance;
-      window.speechSynthesis.speak(utterance);
-      return;
-    }
-  }
-
-  // 3. Fallback to proxy streaming audio
-  const proxyUrl = `/api/voice/proxy-tts?text=${encodeURIComponent(clean.slice(0, 200))}&lang=${params.langCode || 'ta'}`;
-  const audio = new Audio(proxyUrl);
-  activeMultilingualAudio = audio;
-  audio.onplay = () => params.onStart?.();
-  audio.onended = () => {
-    activeMultilingualAudio = null;
-    params.onEnd?.();
-  };
-  audio.onerror = () => {
-    activeMultilingualAudio = null;
-    params.onEnd?.();
-  };
-  audio.play().catch(() => params.onEnd?.());
+  return speakSingleVoice(
+    params.text,
+    params.langCode,
+    params.onStart,
+    params.onEnd,
+    params.onError
+  );
 }
 
 export function isSpeaking(): boolean {
-  if (typeof window === 'undefined') return false;
-  return (
-    ('speechSynthesis' in window && window.speechSynthesis.speaking) ||
-    activeUtterance !== null ||
-    activeMultilingualAudio !== null
-  );
+  return isSingleVoiceSpeaking();
 }

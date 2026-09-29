@@ -27,6 +27,7 @@ import {
   stopAIAssistantVoice,
   fetchGeminiConversationalTurn,
 } from '../../services/voiceAssistantService';
+import { speechSynthesisManager } from '../../services/speechSynthesisSingleton';
 import { GeminiLiveSession } from '../../services/liveVoiceService';
 import { saveIssue } from '../../services/dataService';
 import { searchAddressOrLandmark } from '../../services/geocodingService';
@@ -144,6 +145,13 @@ export const FriendlyVoiceBuddyModal: React.FC<FriendlyVoiceBuddyModalProps> = (
     setIsLiveActive(false);
     setIsAiSpeaking(false);
   };
+
+  // Register external stopper with unified speech manager
+  useEffect(() => {
+    return speechSynthesisManager.registerExternalStopper(() => {
+      stopLiveSession();
+    });
+  }, []);
 
   // Sync language when modal opens
   useEffect(() => {

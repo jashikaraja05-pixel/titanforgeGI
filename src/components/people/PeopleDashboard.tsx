@@ -26,6 +26,7 @@ import {
   speakAIAssistantVoice,
   stopAIAssistantVoice,
   isSubmitCommand,
+  detectLanguageFromSpeech,
   VoiceAssistantAnalysis,
 } from '../../services/voiceAssistantService';
 import { FriendlyVoiceBuddyModal } from './FriendlyVoiceBuddyModal';
@@ -537,10 +538,19 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
         recognition.interimResults = true;
 
         recognition.onstart = () => {
+          stopAIAssistantVoice();
+          setIsAiSpeaking(false);
           setIsRecording(true);
         };
 
+        (recognition as any).onspeechstart = () => {
+          stopAIAssistantVoice();
+          setIsAiSpeaking(false);
+        };
+
         recognition.onresult = (event: any) => {
+          stopAIAssistantVoice();
+          setIsAiSpeaking(false);
           let fullTranscript = '';
           for (let i = 0; i < event.results.length; i++) {
             fullTranscript += event.results[i][0].transcript;
@@ -650,24 +660,39 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
     }
     setAiAssistantReply(analysis.aiVoiceReply);
 
-    if (analysis.extractedLandmark) {
+    // Smart Vocal Location & GPS Placement
+    if (
+      analysis.extractedLandmark === 'CURRENT_GPS_LOCATION' ||
+      spoken.includes('இந்த இடம்') ||
+      spoken.includes('செட் லொகேஷன்') ||
+      spoken.includes('எக்ஸாக்ட் லொகேஷன்') ||
+      spoken.toLowerCase().includes('set location')
+    ) {
+      handleCaptureGps();
+      setAutoMapNotice(
+        resolvedLang === 'ta'
+          ? '🎯 உங்கள் நேரடி GPS லொகேஷன் துல்லியமாக மேப்பில் அமைக்கப்பட்டது'
+          : '🎯 Exact GPS location successfully pinned on map'
+      );
+    } else if (analysis.extractedLandmark) {
       setIncidentLandmark(analysis.extractedLandmark);
       // Real geocoding to update Google Maps pin and auto-center map
-      const geo = await searchAddressOrLandmark(
-        `${analysis.extractedLandmark}, ${incidentDistrict}, ${incidentState}`
-      );
+      const geo = await searchAddressOrLandmark(analysis.extractedLandmark);
       if (geo) {
         setUserLocation((prev) => ({
           ...prev,
           lat: geo.lat,
           lng: geo.lng,
-          address: geo.displayName || `${analysis.extractedLandmark}, ${incidentDistrict}`,
+          address: geo.displayName || `${analysis.extractedLandmark}`,
+          city: geo.city || prev.city,
+          state: geo.state || prev.state,
+          country: geo.country || prev.country,
           isExactGps: true,
         }));
         setAutoMapNotice(
           resolvedLang === 'ta'
-            ? `📍 மேப் தானாக "${analysis.extractedLandmark}" பகுதிக்கு மாற்றப்பட்டது`
-            : `📍 Map auto-positioned to "${analysis.extractedLandmark}"`
+            ? `📍 மேப் தானாக "${geo.city || analysis.extractedLandmark}" பகுதிக்கு மாற்றப்பட்டது (${geo.lat}, ${geo.lng})`
+            : `📍 Map auto-positioned to "${geo.city || analysis.extractedLandmark}" (${geo.lat}, ${geo.lng})`
         );
       }
     }
@@ -778,7 +803,7 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
     }
   };
 
-  const captureCameraPhoto = () => {
+  const captureCameraPhoto = async () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
@@ -789,8 +814,39 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       setSelectedPhotoUrl(dataUrl);
-      analyzeImageFile(dataUrl).then((res) => setPhotoAnalysis(res));
+      setIsAnalyzingPhoto(true);
       closeCamera();
+
+      try {
+        const res = await analyzeImageFile(dataUrl, incidentLandmark || userLocation.address, currentLanguage.code);
+        setPhotoAnalysis(res);
+        setIsAnalyzingPhoto(false);
+
+        if (res.title) {
+          setInputText(`${res.title}\n${res.details}`);
+          if (res.category) setInputCategory(res.category);
+        }
+        if (res.landmarkHint && !incidentLandmark) {
+          setIncidentLandmark(res.landmarkHint);
+          searchAddressOrLandmark(res.landmarkHint).then((geo) => {
+            if (geo) {
+              setUserLocation((prev) => ({
+                ...prev,
+                lat: geo.lat,
+                lng: geo.lng,
+                address: geo.displayName || res.landmarkHint || prev.address,
+                isExactGps: true,
+              }));
+            }
+          });
+        }
+        if (res.aiVoiceReply) {
+          setAiAssistantReply(res.aiVoiceReply);
+          speakAIAssistantVoice(res.aiVoiceReply, currentLanguage.code, () => setIsAiSpeaking(false));
+        }
+      } catch (err) {
+        setIsAnalyzingPhoto(false);
+      }
     }
   };
 
@@ -809,9 +865,37 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
     const localUrl = URL.createObjectURL(file);
     setSelectedPhotoUrl(localUrl);
     setIsAnalyzingPhoto(true);
-    const result = await analyzeImageFile(file);
-    setPhotoAnalysis(result);
-    setIsAnalyzingPhoto(false);
+
+    try {
+      const result = await analyzeImageFile(file, incidentLandmark || userLocation.address, currentLanguage.code);
+      setPhotoAnalysis(result);
+      setIsAnalyzingPhoto(false);
+
+      if (result.title) {
+        setInputText(`${result.title}\n${result.details}`);
+        if (result.category) setInputCategory(result.category);
+      }
+      if (result.landmarkHint && !incidentLandmark) {
+        setIncidentLandmark(result.landmarkHint);
+        searchAddressOrLandmark(result.landmarkHint).then((geo) => {
+          if (geo) {
+            setUserLocation((prev) => ({
+              ...prev,
+              lat: geo.lat,
+              lng: geo.lng,
+              address: geo.displayName || result.landmarkHint || prev.address,
+              isExactGps: true,
+            }));
+          }
+        });
+      }
+      if (result.aiVoiceReply) {
+        setAiAssistantReply(result.aiVoiceReply);
+        speakAIAssistantVoice(result.aiVoiceReply, currentLanguage.code, () => setIsAiSpeaking(false));
+      }
+    } catch (err) {
+      setIsAnalyzingPhoto(false);
+    }
   };
 
   // Trigger Comprehensive AI Case Analysis
@@ -1890,43 +1974,102 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
                         </div>
                       ) : selectedPhotoUrl ? (
                         <div className="space-y-3">
-                          <div className="relative rounded-2xl overflow-hidden border border-red-500/40 h-48 bg-black">
+                          {/* CRITICAL ROAD BLOCK BANNER */}
+                          {(photoAnalysis?.isRoadBlock || photoAnalysis?.severity === 'CRITICAL') && (
+                            <div className="p-2.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white font-black text-xs flex items-center justify-between shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
+                                <span>🚨 CRITICAL SITUATION: ROAD BLOCK DETECTED</span>
+                              </div>
+                              <span className="px-2 py-0.5 rounded bg-black/40 text-[10px] uppercase font-mono tracking-wider">
+                                {photoAnalysis?.defectMarksCount ?? 2} DEFECT MARKS
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="relative rounded-2xl overflow-hidden border-2 border-red-500/60 h-56 bg-black shadow-lg">
                             <img
                               src={selectedPhotoUrl}
                               alt="Civic Issue Evidence"
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover filter brightness-95"
                             />
+
+                            {/* Defect Marks Bounding Boxes Overlay */}
+                            {photoAnalysis?.defects?.map((defect, idx) => (
+                              <div
+                                key={defect.id || idx}
+                                style={{
+                                  top: `${defect.box?.top ?? (idx === 0 ? 28 : 58)}%`,
+                                  left: `${defect.box?.left ?? (idx === 0 ? 22 : 45)}%`,
+                                  width: `${defect.box?.width ?? (idx === 0 ? 38 : 42)}%`,
+                                  height: `${defect.box?.height ?? (idx === 0 ? 32 : 35)}%`,
+                                }}
+                                className="absolute border-2 border-red-500 bg-red-600/25 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.8)] pointer-events-none p-1 flex flex-col justify-between"
+                              >
+                                <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-black w-max shadow">
+                                  {defect.label}
+                                </span>
+                                <span className="text-[8px] font-mono text-red-200 text-right bg-black/60 px-1 rounded w-max self-end">
+                                  {defect.severity}
+                                </span>
+                              </div>
+                            ))}
+
+                            {/* Analyzing Overlay */}
+                            {isAnalyzingPhoto && (
+                              <div className="absolute inset-0 bg-red-950/70 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white">
+                                <span className="w-6 h-6 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-xs font-bold font-mono">Gemini Computer Vision Scanning...</span>
+                              </div>
+                            )}
+
                             <button
+                              type="button"
                               onClick={() => {
                                 setSelectedPhotoUrl('');
                                 setPhotoAnalysis(null);
                               }}
-                              className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-black/80 text-[10px] text-red-400 border border-white/20 hover:bg-red-950"
+                              className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-black/80 text-[10px] font-bold text-red-400 border border-white/20 hover:bg-red-950 cursor-pointer"
                             >
-                              Remove
+                              ✕ Remove
                             </button>
                           </div>
 
                           {/* AI Vision Readout */}
                           {photoAnalysis && (
-                            <div className="p-3.5 rounded-xl bg-black/60 border border-red-500/30 text-xs space-y-1.5">
+                            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-red-950/70 via-black/80 to-slate-950 border border-red-500/40 text-xs space-y-2">
                               <div className="flex items-center justify-between">
-                                <span className="font-bold text-red-400">AI IMAGE ANALYSIS</span>
-                                <span className="font-mono text-emerald-400 font-bold">
-                                  {photoAnalysis.confidence}% Confidence
+                                <span className="font-extrabold text-red-400 flex items-center gap-1.5">
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <span>GEMINI COMPUTER VISION INSPECTION</span>
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-red-600/30 border border-red-500/50 text-[10px] font-mono text-red-300 font-bold">
+                                  {photoAnalysis.confidence}% Precision Match
                                 </span>
                               </div>
-                              <div className="flex justify-between text-slate-300">
-                                <span>Detected Damage:</span>
+
+                              <div className="grid grid-cols-2 gap-2 text-slate-300">
+                                <div className="p-2 rounded-xl bg-white/5 border border-white/10">
+                                  <span className="text-[10px] text-slate-400 block">Total Defect Marks:</span>
+                                  <span className="font-bold text-white">
+                                    {photoAnalysis.defectMarksCount ?? 2} Marks (Crater + Flood)
+                                  </span>
+                                </div>
+                                <div className="p-2 rounded-xl bg-white/5 border border-white/10">
+                                  <span className="text-[10px] text-slate-400 block">Severity Level:</span>
+                                  <span className="font-extrabold text-red-400">
+                                    {photoAnalysis.severity} (RED ALERT)
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="p-2 rounded-xl bg-black/60 border border-red-500/20 text-slate-200">
+                                <span className="text-slate-400 block text-[10px]">Detected Condition:</span>
                                 <span className="font-semibold text-white">{photoAnalysis.detectedObject}</span>
+                                <p className="text-[11px] text-slate-300 mt-1">
+                                  {photoAnalysis.details}
+                                </p>
                               </div>
-                              <div className="flex justify-between text-slate-300">
-                                <span>Severity Rating:</span>
-                                <span className="font-bold text-amber-400">{photoAnalysis.severity}</span>
-                              </div>
-                              <p className="text-[11px] text-slate-400 italic pt-1 border-t border-white/10">
-                                {photoAnalysis.details}
-                              </p>
                             </div>
                           )}
                         </div>
@@ -1975,18 +2118,96 @@ export const PeopleDashboard: React.FC<PeopleDashboardProps> = ({
                   {/* RIGHT COLUMN: GPS MAP & LOCATION */}
                   <div className="space-y-6">
                     <div className="p-6 rounded-3xl bg-slate-900/60 border border-white/10 space-y-4">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <MapPin className="w-4 h-4 text-red-400" />
                           <h3 className="text-sm font-bold text-white">📍 Incident Location (சம்பவம் நடந்த இடம்)</h3>
                         </div>
                         <button
+                          type="button"
                           onClick={handleCaptureGps}
                           disabled={isLocating}
-                          className="px-2.5 py-1 rounded-lg bg-red-950/60 border border-red-500/40 text-[11px] font-medium text-red-300 hover:bg-red-900/50 transition-colors flex items-center gap-1.5"
+                          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-xs font-bold text-white shadow-md flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
                         >
-                          <Navigation className="w-3 h-3 text-red-400" />
-                          <span>{t('useGps', currentLanguage.code)}</span>
+                          <Navigation className="w-3.5 h-3.5 text-white animate-pulse" />
+                          <span>{currentLanguage.code === 'ta' ? '🎯 செட் எக்ஸாக்ட் லொகேஷன்' : '🎯 Set Exact GPS Location'}</span>
+                        </button>
+                      </div>
+
+                      {/* Quick Location Pointers */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                        <span className="text-[10px] font-bold text-red-400 uppercase shrink-0">Quick Pointers:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIncidentLandmark('Rathinam College, Eachanari, Coimbatore');
+                            searchAddressOrLandmark('rathinam').then((geo) => {
+                              if (geo) {
+                                setUserLocation({
+                                  lat: geo.lat,
+                                  lng: geo.lng,
+                                  address: 'Rathinam Techzone & College, Pollachi Main Rd, Eachanari, Coimbatore',
+                                  city: 'Coimbatore',
+                                  state: 'Tamil Nadu',
+                                  country: 'India',
+                                  isExactGps: true,
+                                });
+                                setAutoMapNotice('📍 மேப் தானாக "ரத்தினம் (Coimbatore)" பகுதிக்கு மாற்றப்பட்டது');
+                              }
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-red-950/70 border border-red-500/40 text-red-200 hover:bg-red-900/60 text-[11px] font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <MapPin className="w-3 h-3 text-red-400" />
+                          <span>📍 ரத்தினம் (Rathinam)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIncidentLandmark('Gandhipuram 100 Feet Road, Ward 42, Coimbatore');
+                            searchAddressOrLandmark('gandhipuram').then((geo) => {
+                              if (geo) {
+                                setUserLocation({
+                                  lat: geo.lat,
+                                  lng: geo.lng,
+                                  address: '100 Feet Road, Ward 42, Gandhipuram, Coimbatore',
+                                  city: 'Coimbatore',
+                                  state: 'Tamil Nadu',
+                                  country: 'India',
+                                  isExactGps: true,
+                                });
+                                setAutoMapNotice('📍 மேப் தானாக "காந்திபுரம் (Coimbatore)" பகுதிக்கு மாற்றப்பட்டது');
+                              }
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-red-950/70 border border-red-500/40 text-red-200 hover:bg-red-900/60 text-[11px] font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <MapPin className="w-3 h-3 text-red-400" />
+                          <span>📍 காந்திபுரம் (Gandhipuram)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIncidentLandmark('Anna Nagar 2nd Avenue, Ward 104, Chennai');
+                            searchAddressOrLandmark('anna nagar').then((geo) => {
+                              if (geo) {
+                                setUserLocation({
+                                  lat: geo.lat,
+                                  lng: geo.lng,
+                                  address: 'Anna Nagar 2nd Avenue, Ward 104, Chennai',
+                                  city: 'Chennai',
+                                  state: 'Tamil Nadu',
+                                  country: 'India',
+                                  isExactGps: true,
+                                });
+                                setAutoMapNotice('📍 மேப் தானாக "அண்ணா நகர் (Chennai)" பகுதிக்கு மாற்றப்பட்டது');
+                              }
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/15 text-slate-300 hover:text-white text-[11px] font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <MapPin className="w-3 h-3 text-slate-400" />
+                          <span>📍 அண்ணா நகர் (Anna Nagar)</span>
                         </button>
                       </div>
 

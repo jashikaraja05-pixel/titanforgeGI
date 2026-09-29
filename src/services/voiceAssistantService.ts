@@ -5,6 +5,13 @@
  * NO mixed-language slop: each language produces 100% native replies.
  */
 
+import {
+  speakSingleVoice,
+  stopSingleVoice,
+  isSingleVoiceSpeaking,
+  speechSynthesisManager,
+} from './speechSynthesisSingleton';
+
 export type SupportedCivicLang = 'ta' | 'ml' | 'te' | 'kn' | 'hi' | 'en';
 
 export interface CivicClassification {
@@ -433,6 +440,62 @@ export function isSubmitCommand(text: string, lang: SupportedCivicLang = 'ta'): 
 // Extract location & landmarks from citizen voice text
 export function extractLandmarkFromSpeech(text: string): string {
   const lower = text.toLowerCase();
+
+  // 1. Direct "Set Exact Location / This Place" vocal triggers
+  const setLocationPhrases = [
+    'இந்த இடம்',
+    'இந்த இடத்துல',
+    'இந்த இடத்தில்',
+    'இங்கே',
+    'இங்க',
+    'இப்ப இருக்கிற இடம்',
+    'செட் லொகேஷன்',
+    'எக்ஸாக்ட் லொகேஷன்',
+    'set location',
+    'exact location',
+    'this place',
+    'here',
+    'current location',
+    'my location',
+  ];
+  for (const phrase of setLocationPhrases) {
+    if (lower.includes(phrase)) {
+      return 'CURRENT_GPS_LOCATION';
+    }
+  }
+
+  // 2. High-precision known landmarks and hubs (e.g. Rathinam, Gandhipuram)
+  const knownPlaces = [
+    'ரத்தினம் காலேஜ்',
+    'ரத்தினம்',
+    'rathinam college',
+    'rathinam',
+    'ஈச்சனாரி',
+    'eachanari',
+    'காந்திபுரம்',
+    'gandhipuram',
+    'அண்ணா நகர்',
+    'anna nagar',
+    'கோயம்புத்தூர்',
+    'கோவை',
+    'coimbatore',
+    'சென்னை',
+    'chennai',
+    'மதுரை',
+    'madurai',
+    'திருச்சி',
+    'trichy',
+    'சேலம்',
+    'salem',
+    'திருநெல்வேலி',
+    'tirunelveli',
+  ];
+  for (const place of knownPlaces) {
+    if (lower.includes(place)) {
+      return place;
+    }
+  }
+
   const locationMarkers = [
     'அருகில்',
     'பக்கத்தில்',
@@ -855,130 +918,13 @@ export function processCitizenVoice(
   };
 }
 
-// Audio Engine for Crystal-Clear Native Speech Output (Gemini AI TTS & Natural Stream)
-let activeAudioElement: HTMLAudioElement | null = null;
-let activeAudioContext: AudioContext | null = null;
-
 export function stopAIAssistantVoice(): void {
-  if (activeAudioElement) {
-    try {
-      activeAudioElement.pause();
-      activeAudioElement.currentTime = 0;
-    } catch {
-      // ignore
-    }
-    activeAudioElement = null;
-  }
-  if (activeAudioContext) {
-    try {
-      activeAudioContext.close();
-    } catch {
-      // ignore
-    }
-    activeAudioContext = null;
-  }
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.cancel();
-    } catch {
-      // ignore
-    }
-  }
-}
-
-// Find a genuine native voice (NEVER fall back to English for Tamil or Indian languages)
-function findStrictNativeVoice(langCode: string, bcpLocale: string): SpeechSynthesisVoice | null {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices || voices.length === 0) return null;
-
-  const code = langCode.toLowerCase();
-  const bcp = bcpLocale.toLowerCase();
-
-  // For Tamil: strictly check that the voice is Tamil
-  if (code === 'ta') {
-    return (
-      voices.find(
-        (v) =>
-          (v.lang.toLowerCase().startsWith('ta') ||
-            v.name.toLowerCase().includes('tamil') ||
-            v.name.includes('தமிழ்')) &&
-          !v.name.toLowerCase().includes('english')
-      ) || null
-    );
-  }
-
-  // For Malayalam: strictly check Malayalam
-  if (code === 'ml') {
-    return (
-      voices.find(
-        (v) =>
-          (v.lang.toLowerCase().startsWith('ml') ||
-            v.name.toLowerCase().includes('malayalam') ||
-            v.name.includes('മലയാളം')) &&
-          !v.name.toLowerCase().includes('english')
-      ) || null
-    );
-  }
-
-  // For Telugu:
-  if (code === 'te') {
-    return (
-      voices.find(
-        (v) =>
-          (v.lang.toLowerCase().startsWith('te') ||
-            v.name.toLowerCase().includes('telugu') ||
-            v.name.includes('తెలుగు')) &&
-          !v.name.toLowerCase().includes('english')
-      ) || null
-    );
-  }
-
-  // For Kannada:
-  if (code === 'kn') {
-    return (
-      voices.find(
-        (v) =>
-          (v.lang.toLowerCase().startsWith('kn') ||
-            v.name.toLowerCase().includes('kannada') ||
-            v.name.includes('ಕನ್ನಡ')) &&
-          !v.name.toLowerCase().includes('english')
-      ) || null
-    );
-  }
-
-  // For Hindi:
-  if (code === 'hi') {
-    return (
-      voices.find(
-        (v) =>
-          (v.lang.toLowerCase().startsWith('hi') ||
-            v.name.toLowerCase().includes('hindi') ||
-            v.name.includes('हिन्दी')) &&
-          !v.name.toLowerCase().includes('english')
-      ) || null
-    );
-  }
-
-  // For English:
-  if (code === 'en') {
-    return (
-      voices.find(
-        (v) =>
-          v.lang.toLowerCase().startsWith('en') ||
-          v.lang.toLowerCase() === bcp
-      ) || null
-    );
-  }
-
-  return voices.find((v) => v.lang.toLowerCase().startsWith(code)) || null;
+  stopSingleVoice();
 }
 
 /**
- * High-Fidelity Speech Player for Fluent Tamil and Multi-Lingual Civic AI
- * 1. Checks Gemini AI TTS (/api/voice/gemini-tts) for human-like fluency
- * 2. Checks browser SpeechSynthesis ONLY IF a verified native Tamil voice exists
- * 3. Falls back to pristine streaming audio proxy (/api/voice/proxy-tts)
+ * Unified Speech Player using SpeechSynthesisSingleton
+ * Guarantees strictly SINGLE-VOICE output across all components.
  */
 export async function speakAIAssistantVoice(
   text: string,
@@ -986,140 +932,7 @@ export async function speakAIAssistantVoice(
   onStart?: () => void,
   onEnd?: () => void
 ): Promise<void> {
-  stopAIAssistantVoice();
-
-  if (typeof window === 'undefined') {
-    if (onEnd) onEnd();
-    return;
-  }
-
-  const cleanText = text.trim();
-  if (!cleanText) {
-    if (onEnd) onEnd();
-    return;
-  }
-
-  const bcpMap: Record<string, string> = {
-    ta: 'ta-IN',
-    ml: 'ml-IN',
-    te: 'te-IN',
-    kn: 'kn-IN',
-    hi: 'hi-IN',
-    en: 'en-US',
-  };
-  const targetBcp = bcpMap[langCode] || 'ta-IN';
-
-  // 1. Try Gemini TTS / Server Speech API first for fluent, authentic native pronunciation
-  try {
-    const res = await fetch('/api/voice/gemini-tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: cleanText,
-        lang: langCode,
-        voice: 'Kore',
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.audioUrl) {
-        playDirectAudioUrl(data.audioUrl, onStart, onEnd);
-        return;
-      }
-    }
-  } catch (err) {
-    console.warn('Gemini TTS fetch notice, attempting voice synthesis alternatives:', err);
-  }
-
-  // 2. Try browser SpeechSynthesis ONLY IF a genuine native voice exists
-  // NEVER allow an English voice to read Tamil or Indian languages!
-  if ('speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.resume();
-      const verifiedVoice = findStrictNativeVoice(langCode, targetBcp);
-
-      if (verifiedVoice) {
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.voice = verifiedVoice;
-        utterance.lang = verifiedVoice.lang || targetBcp;
-        utterance.rate = 0.95;
-        utterance.pitch = 1.0;
-
-        let ended = false;
-        const safeEnd = () => {
-          if (!ended) {
-            ended = true;
-            if (onEnd) onEnd();
-          }
-        };
-
-        utterance.onstart = () => {
-          if (onStart) onStart();
-        };
-        utterance.onend = safeEnd;
-        utterance.onerror = () => {
-          playStreamingProxyAudio(cleanText, langCode, onStart, onEnd);
-        };
-
-        window.speechSynthesis.speak(utterance);
-        return;
-      }
-    } catch {
-      // fallback
-    }
-  }
-
-  // 3. Pristine Streaming Audio Proxy Fallback (Guaranteed crystal-clear native Tamil)
-  playStreamingProxyAudio(cleanText, langCode, onStart, onEnd);
-}
-
-// Play audio directly from URL (Data URL or streaming endpoint)
-function playDirectAudioUrl(
-  url: string,
-  onStart?: () => void,
-  onEnd?: () => void
-): void {
-  try {
-    const audio = new Audio(url);
-    activeAudioElement = audio;
-
-    let hasStarted = false;
-    audio.onplay = () => {
-      hasStarted = true;
-      if (onStart) onStart();
-    };
-
-    audio.onended = () => {
-      activeAudioElement = null;
-      if (onEnd) onEnd();
-    };
-
-    audio.onerror = () => {
-      activeAudioElement = null;
-      if (onEnd) onEnd();
-    };
-
-    audio.play().catch((err) => {
-      console.warn('Audio play error, finishing:', err);
-      if (!hasStarted && onEnd) onEnd();
-    });
-  } catch (err) {
-    console.warn('Audio player instantiation error:', err);
-    if (onEnd) onEnd();
-  }
-}
-
-// Streaming Native Proxy Audio
-function playStreamingProxyAudio(
-  text: string,
-  langCode: string,
-  onStart?: () => void,
-  onEnd?: () => void
-): void {
-  const safeText = text.slice(0, 200);
-  const proxyUrl = `/api/voice/proxy-tts?text=${encodeURIComponent(safeText)}&lang=${langCode || 'en'}`;
-  playDirectAudioUrl(proxyUrl, onStart, onEnd);
+  return speakSingleVoice(text, langCode, onStart, onEnd);
 }
 
 /**
