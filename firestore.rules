@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'gayathirisathyamoorthy2006@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Admin collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Civic Issues Collection
+    match /issues/{issueId} {
+      // Transparency: Public and community members can read civic reports and progress
+      allow read: if true;
+
+      // Authenticated citizens and government users can submit issues
+      allow create: if isSignedIn() && isValidId(issueId);
+
+      // Authenticated users can update status, timeline, resolution, or feedback
+      allow update: if isSignedIn();
+
+      // Only administrators can delete records
+      allow delete: if isAdmin();
+    }
+
+    // User Feedback Collection
+    match /feedback/{feedbackId} {
+      // Transparency: Citizens and officials can read public feedback and satisfaction scores
+      allow read: if true;
+
+      // Authenticated users can submit feedback
+      allow create: if isSignedIn() && isValidId(feedbackId);
+
+      // Author or Admin can update or delete
+      allow update: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Government Policies & Area Alerts Collection
+    match /policies/{policyId} {
+      // Transparency: Citizens can read official policies, directives, and alerts affecting their area
+      allow read: if true;
+
+      // Government officials and authenticated administrators can publish policies
+      allow create: if isSignedIn() && isValidId(policyId);
+
+      // Authenticated officials or admins can update policy details
+      allow update: if isSignedIn();
+
+      // Only administrators can delete policy records
+      allow delete: if isAdmin();
+    }
+  }
+}

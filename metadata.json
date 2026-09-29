@@ -1,0 +1,6 @@
+{
+  "name": "GOVINSIGHT",
+  "description": "Global AI-powered civic intelligence and government action platform. Your Voice. Your Place. Your Impact.",
+  "requestFramePermissions": ["geolocation", "microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

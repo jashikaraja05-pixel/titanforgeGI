@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GOVINSIGHT</title>
+    <meta name="description" content="Global AI-powered civic intelligence and government action platform. Your Voice. Your Place. Your Impact." />
+    <meta property="og:title" content="GOVINSIGHT" />
+    <meta property="og:description" content="Global AI-powered civic intelligence and government action platform. Your Voice. Your Place. Your Impact." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Suppress Vite HMR WebSocket connection failure in proxy/iframe environment
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason ? String(event.reason.message || event.reason) : '';
+        if (reason.indexOf('WebSocket') !== -1 || reason.indexOf('websocket') !== -1) {
+          event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        }
+      }, true);
+      window.addEventListener('error', function(event) {
+        var msg = event.message ? String(event.message) : '';
+        if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('websocket') !== -1 || msg.indexOf('[vite]') !== -1) {
+          event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        }
+      }, true);
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#08090C] text-slate-100 antialiased selection:bg-red-600 selection:text-white overflow-x-hidden">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
